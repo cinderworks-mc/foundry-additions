@@ -1,0 +1,62 @@
+plugins {
+	id 'java-library'
+	id 'net.neoforged.moddev' version '2.0.146'
+}
+
+version = project.mod_version
+group = project.maven_group
+base.archivesName = "foundryadditions-${project.minecraft_version}"
+
+java {
+	toolchain {
+		// java 21 exactly. the rig's run-test.sh hard-fails on anything else,
+		// and the plan pins it.
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+neoForge {
+	// pinned to the pack exactly, no ranges
+	version = project.neoforge_version
+
+	runs {
+		server {
+			server()
+		}
+	}
+
+	mods {
+		foundryadditions {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// main code uses the gson minecraft already ships; the tests run without
+	// the minecraft classpath so they pull their own copy
+	testImplementation "com.google.code.gson:gson:${project.gson_version}"
+}
+
+test {
+	useJUnitPlatform()
+}
+
+processResources {
+	var props = [
+		mod_version      : project.mod_version,
+		minecraft_version: project.minecraft_version,
+		neoforge_version : project.neoforge_version,
+	]
+	inputs.properties props
+	filesMatching('META-INF/neoforge.mods.toml') {
+		expand props
+	}
+}

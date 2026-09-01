@@ -1,0 +1,39 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+issueTrackerURL="https://github.com/cinderworks-mc/foundry-additions/issues"
+
+[[mods]]
+modId="foundryadditions"
+version="${mod_version}"
+displayName="foundry-additions"
+authors="patrickhere"
+description='''the foundry's own mod. server-side plumbing for one server and one whitelist.'''
+
+# no displayTest here on purpose. IGNORE_ALL_VERSION is not verified as a
+# 1.21.1 toml property, so it is not claimed. v0.1 ships nothing a vanilla
+# client needs anyway, and the vanilla-client join test on the rig is what
+# proves that, not a toml line.
+
+[[dependencies.foundryadditions]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.0,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.foundryadditions]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.21.2)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.foundryadditions]]
+# the afk bridge writes into this mod's afk set when it is present. the whole
+# integration is reflection behind a runtime ModList check, so absent is fine.
+modId="rift_essentials"
+type="optional"
+versionRange="[0,)"
+ordering="NONE"
+side="SERVER"

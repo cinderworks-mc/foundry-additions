@@ -1,0 +1,25 @@
+# one workflow, on purpose: tag push -> build -> jar as a release asset.
+# no modrinth publish, no signing, no nightly. the pack consumes the asset
+# with a github: manifest line resolved by its own build script.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: ./gradlew build --no-daemon
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/*.jar

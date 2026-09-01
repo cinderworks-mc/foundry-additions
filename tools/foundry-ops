@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""client for the foundry-additions ops socket.
+
+stdlib only, because the box this runs on has python3 and no jvm. the
+protocol is one bounded request line per connection, one minified json line
+back, close. deliberately dumb enough that this file is the whole client.
+
+exit codes: 0 the verb answered ok:true, 2 the server answered ok:false
+(including server_unresponsive, the answer worth alerting on), 1 the socket
+could not be reached at all.
+"""
+
+import argparse
+import json
+import socket
+import sys
+
+VERBS = ("ready", "status", "list", "sessions", "tps")
+MAX_RESPONSE = 256 * 1024
+
+
+def main():
+    ap = argparse.ArgumentParser(description="foundry-additions ops socket client")
+    ap.add_argument("verb", choices=VERBS)
+    ap.add_argument("--socket", default="/run/minecraft/foundry-ops.sock",
+                    help="socket path (default: %(default)s)")
+    ap.add_argument("--timeout", type=float, default=6.0,
+                    help="seconds; covers the server's 3s read deadline plus "
+                         "its 2s main-thread deadline (default: %(default)s)")
+    args = ap.parse_args()
+
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(args.timeout)
+        s.connect(args.socket)
+        s.sendall(args.verb.encode() + b"\n")
+        buf = b""
+        while b"\n" not in buf and len(buf) <= MAX_RESPONSE:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+        s.close()
+    except OSError as e:
+        print(f"foundry-ops: {args.socket}: {e}", file=sys.stderr)
+        return 1
+
+    line = buf.split(b"\n", 1)[0].decode("utf-8", "replace")
+    print(line)
+    try:
+        return 0 if json.loads(line).get("ok") is True else 2
+    except ValueError:
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
