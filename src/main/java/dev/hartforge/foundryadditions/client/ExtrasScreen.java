@@ -27,6 +27,7 @@ public final class ExtrasScreen extends Screen {
 
     private final Map<String, Path> found = new HashMap<>();
     private final Map<String, String> notes = new HashMap<>();
+    private boolean closed;
 
     public ExtrasScreen(Screen parent, List<ExtrasChecker.Problem> problems) {
         super(Component.literal("the foundry needs more mods"));
@@ -66,7 +67,7 @@ public final class ExtrasScreen extends Screen {
                 addRenderableWidget(Button.builder(Component.literal("i downloaded it"), b -> scan(e))
                         .bounds(x, y + 11, restW, 20).build());
             } else {
-                addRenderableWidget(Button.builder(Component.literal("move it into mods"), b -> move(e, hit))
+                addRenderableWidget(Button.builder(Component.literal("move it into mods"), b -> move(e, hit, p.oldFile()))
                         .bounds(x, y + 11, restW, 20).build());
             }
             y += ROW_H;
@@ -96,7 +97,7 @@ public final class ExtrasScreen extends Screen {
             ExtrasManifest.Extra e = p.extra();
             String label = p.status() == ExtrasChecker.Status.MISSING
                     ? e.name() + " - missing"
-                    : e.name() + " - have " + p.haveVersion() + ", need " + e.minVersion() + "+";
+                    : e.name() + " - have " + p.haveVersion() + ", need " + p.need() + "+";
             g.drawCenteredString(this.font, Component.literal(label), cx, y, 0xFFFFFF);
             String note = notes.get(e.modId());
             if (note == null && found.containsKey(e.modId())) {
@@ -109,8 +110,13 @@ public final class ExtrasScreen extends Screen {
         }
     }
 
+    public boolean closed() {
+        return closed;
+    }
+
     @Override
     public void onClose() {
+        closed = true;
         this.minecraft.setScreen(parent);
     }
 
@@ -125,7 +131,7 @@ public final class ExtrasScreen extends Screen {
     private void scan(ExtrasManifest.Extra e) {
         notes.put(e.modId(), "looking in your downloads folder...");
         Minecraft mc = this.minecraft;
-        CompletableFuture.supplyAsync(() -> DownloadsScanner.find(downloadsDir, e.jarHint(), Instant.now()))
+        CompletableFuture.supplyAsync(() -> DownloadsScanner.find(downloadsDir, e.jarHint(), e.minBuild(), Instant.now()))
                 .thenAccept(hit -> mc.execute(() -> {
                     if (hit.isPresent()) {
                         found.put(e.modId(), hit.get());
@@ -137,23 +143,43 @@ public final class ExtrasScreen extends Screen {
                 }));
     }
 
-    private void move(ExtrasManifest.Extra e, Path jar) {
+    private record Done(Path jar, DownloadsScanner.MoveResult res, DownloadsScanner.RetireResult retired) {}
+
+    private void move(ExtrasManifest.Extra e, Path cached, String oldFile) {
         Minecraft mc = this.minecraft;
-        CompletableFuture.supplyAsync(() -> DownloadsScanner.moveIntoMods(downloadsDir, jar, modsDir))
-                .thenAccept(res -> mc.execute(() -> {
-                    switch (res) {
-                        case MOVED -> notes.put(e.modId(), "moved into mods, restart the game");
-                        case COPIED_SOURCE_KEPT -> notes.put(e.modId(),
-                                "copied into mods, couldn't delete the download. restart the game");
-                        case ALREADY_EXISTS -> notes.put(e.modId(),
-                                "a file with that name is already in mods, left alone");
-                        default -> notes.put(e.modId(), "couldn't move it, use open mods folder");
+        // rescan, a newer jar may have landed since the first scan
+        CompletableFuture.supplyAsync(() -> {
+            Path jar = DownloadsScanner.find(downloadsDir, e.jarHint(), e.minBuild(), Instant.now()).orElse(cached);
+            var res = DownloadsScanner.moveIntoMods(downloadsDir, jar, modsDir);
+            boolean landed = res == DownloadsScanner.MoveResult.MOVED
+                    || res == DownloadsScanner.MoveResult.COPIED_SOURCE_KEPT;
+            // two jars of one mod kills the launch, so the old one steps aside
+            var retired = landed && !oldFile.isEmpty() && !oldFile.equals(jar.getFileName().toString())
+                    ? DownloadsScanner.retireOld(modsDir, oldFile) : null;
+            return new Done(jar, res, retired);
+        }).thenAccept(r -> mc.execute(() -> {
+            var res = r.res();
+            found.put(e.modId(), r.jar());
+            switch (res) {
+                case MOVED, COPIED_SOURCE_KEPT -> {
+                    String base = res == DownloadsScanner.MoveResult.MOVED
+                            ? "moved into mods" : "copied into mods, couldn't delete the download";
+                    if (r.retired() == null) {
+                        notes.put(e.modId(), base + ", restart the game");
+                    } else if (r.retired() == DownloadsScanner.RetireResult.RETIRED) {
+                        notes.put(e.modId(), base + ", old " + oldFile + " set aside as " + oldFile
+                                + ".old, restart the game");
+                    } else {
+                        notes.put(e.modId(), "moved the new one, but remove " + oldFile
+                                + " from the mods folder or the game will not start");
                     }
-                    if (res == DownloadsScanner.MoveResult.MOVED
-                            || res == DownloadsScanner.MoveResult.COPIED_SOURCE_KEPT) {
-                        found.remove(e.modId());
-                    }
-                    if (mc.screen == this) this.rebuildWidgets();
-                }));
+                    found.remove(e.modId());
+                }
+                case ALREADY_EXISTS -> notes.put(e.modId(),
+                        "a file with that name is already in mods, left alone");
+                default -> notes.put(e.modId(), "couldn't move it, use open mods folder");
+            }
+            if (mc.screen == this) this.rebuildWidgets();
+        }));
     }
 }

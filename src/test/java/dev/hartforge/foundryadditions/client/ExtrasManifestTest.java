@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,6 +67,13 @@ class ExtrasManifestTest {
                  "download":"http://example.com/d"}]}""").get(0);
         assertEquals("", e.download());
         assertEquals("https://example.com/p", e.page());
+    }
+
+    @Test
+    void parsesMinBuild() {
+        assertEquals("2.0.1.31", ExtrasManifest.parse("""
+                {"version":1,"extras":[{"modId":"a","name":"A","minBuild":"2.0.1.31"}]}""").get(0).minBuild());
+        assertEquals("", ExtrasManifest.parse(GOOD).get(0).minBuild());
     }
 
     @Test
@@ -131,5 +139,43 @@ class ExtrasManifestTest {
     @Test
     void theBundledResourceParses() {
         ExtrasManifest.parse(ExtrasManifest.bundledText());
+    }
+
+    @Test
+    void overrideWinsAndSkipsTheNetwork(@TempDir Path dir) throws IOException {
+        Path override = dir.resolve("override.json");
+        Files.writeString(override, BUNDLED);
+        Path cache = dir.resolve("cache.json");
+        Files.writeString(cache, GOOD);
+        List<ExtrasManifest.Extra> l = ExtrasManifest.load(override, () -> {
+            throw new AssertionError("fetched");
+        }, cache, () -> GOOD, w -> {});
+        assertEquals("bundled", l.get(0).modId());
+        assertEquals(GOOD, Files.readString(cache));
+    }
+
+    @Test
+    void malformedOverrideFallsThrough(@TempDir Path dir) throws IOException {
+        Path override = dir.resolve("override.json");
+        Files.writeString(override, "{oops");
+        List<String> warns = new ArrayList<>();
+        assertEquals(2, ExtrasManifest.load(override, () -> GOOD, dir.resolve("cache.json"), () -> BUNDLED, warns::add).size());
+        assertEquals(1, warns.size());
+        assertEquals("bundled",
+                ExtrasManifest.load(override, offline(), dir.resolve("none.json"), () -> BUNDLED, w -> {}).get(0).modId());
+    }
+
+    @Test
+    void emptyOverrideMeansNoExtras(@TempDir Path dir) throws IOException {
+        Path override = dir.resolve("override.json");
+        Files.writeString(override, "{\"version\":1,\"extras\":[]}");
+        assertEquals(List.of(), ExtrasManifest.load(override, () -> GOOD, dir.resolve("cache.json"), () -> GOOD, w -> {}));
+    }
+
+    @Test
+    void absentOverrideChangesNothing(@TempDir Path dir) {
+        List<ExtrasManifest.Extra> l = ExtrasManifest.load(dir.resolve("nope.json"), () -> GOOD,
+                dir.resolve("cache.json"), () -> BUNDLED, w -> {});
+        assertEquals(2, l.size());
     }
 }

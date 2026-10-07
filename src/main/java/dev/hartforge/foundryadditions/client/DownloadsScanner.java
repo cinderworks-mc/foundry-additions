@@ -18,17 +18,20 @@ public final class DownloadsScanner {
 
     public enum MoveResult { MOVED, COPIED_SOURCE_KEPT, ALREADY_EXISTS, REFUSED, FAILED }
 
+    public enum RetireResult { RETIRED, REFUSED, FAILED }
+
     private DownloadsScanner() {}
 
     public static Path defaultDownloadsDir() {
         return Paths.get(System.getProperty("user.home", "."), "Downloads");
     }
 
-    public static Optional<Path> find(Path downloadsDir, String jarHint, Instant now) {
+    public static Optional<Path> find(Path downloadsDir, String jarHint, String minBuild, Instant now) {
         if (jarHint.isBlank() || !Files.isDirectory(downloadsDir)) return Optional.empty();
         String hint = jarHint.toLowerCase(Locale.ROOT);
         Path best = null;
         Instant bestTime = null;
+        String bestBuild = "";
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(downloadsDir)) {
             for (Path p : ds) {
                 String name = p.getFileName().toString().toLowerCase(Locale.ROOT);
@@ -37,9 +40,14 @@ public final class DownloadsScanner {
                 Instant mtime = Files.getLastModifiedTime(p).toInstant();
                 // a little slack for clock skew, nothing from the future beyond that
                 if (mtime.isBefore(now.minus(MAX_AGE)) || mtime.isAfter(now.plusSeconds(300))) continue;
-                if (bestTime == null || mtime.isAfter(bestTime)) {
+                if (ExtrasChecker.buildTooOld(p.getFileName().toString(), minBuild)) continue;
+                String build = ExtrasChecker.buildOf(p.getFileName().toString());
+                // higher build first, mtime only when the builds tie or one won't parse
+                int byBuild = build.isEmpty() || bestBuild.isEmpty() ? 0 : Versions.compare(build, bestBuild);
+                if (best == null || byBuild > 0 || (byBuild == 0 && mtime.isAfter(bestTime))) {
                     best = p;
                     bestTime = mtime;
+                    bestBuild = build;
                 }
             }
         } catch (IOException e) {
@@ -79,5 +87,21 @@ public final class DownloadsScanner {
             return MoveResult.COPIED_SOURCE_KEPT;
         }
         return MoveResult.MOVED;
+    }
+
+    // rename only, never delete. neoforge skips non-.jar files so .old is inert
+    public static RetireResult retireOld(Path modsDir, String oldFileName) {
+        Path dir = modsDir.toAbsolutePath().normalize();
+        Path old = dir.resolve(oldFileName).normalize();
+        if (!dir.equals(old.getParent()) || !oldFileName.endsWith(".jar")) return RetireResult.REFUSED;
+        if (!Files.isRegularFile(old, LinkOption.NOFOLLOW_LINKS)) return RetireResult.REFUSED;
+        Path aside = dir.resolve(oldFileName + ".old");
+        if (Files.exists(aside, LinkOption.NOFOLLOW_LINKS)) return RetireResult.REFUSED;
+        try {
+            Files.move(old, aside);
+        } catch (IOException e) {
+            return RetireResult.FAILED;
+        }
+        return RetireResult.RETIRED;
     }
 }

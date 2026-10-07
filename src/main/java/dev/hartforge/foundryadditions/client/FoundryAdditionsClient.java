@@ -18,39 +18,59 @@ import java.util.concurrent.CompletableFuture;
 @Mod(value = FoundryAdditions.MOD_ID, dist = Dist.CLIENT)
 public final class FoundryAdditionsClient {
 
-    private boolean shown;
-    private final CompletableFuture<List<ExtrasManifest.Extra>> manifest;
+    private boolean done;
+    private List<ExtrasChecker.Problem> problems;
+    private ExtrasScreen showing;
+    private CompletableFuture<List<ExtrasManifest.Extra>> manifest;
 
     public FoundryAdditionsClient() {
-        Path cache = FMLPaths.CONFIGDIR.get().resolve("foundry-additions").resolve("extras-cache.json");
-        // TODO: this fetch runs even with extrasPrompt off, config isn't loaded yet in here
+        NeoForge.EVENT_BUS.register(this);
+    }
+
+    // polling the title instead of an Opening hook, other mods stack screens over it.
+    // distant horizons' update screen replaces ours, so it comes back until the player closes it
+    @SubscribeEvent
+    public void onClientTick(ClientTickEvent.Post event) {
+        if (done) return;
+        if (showing != null && showing.closed()) {
+            done = true;
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (!(mc.screen instanceof TitleScreen title) || mc.getOverlay() != null) return;
+
+        if (problems == null) {
+            if (manifest == null) {
+                if (!FoundryConfig.EXTRAS_PROMPT.get()) {
+                    FoundryAdditions.LOGGER.info("extras prompt disabled by config");
+                    done = true;
+                    return;
+                }
+                startLoad();
+            }
+            if (!manifest.isDone()) return;
+            problems = ExtrasChecker.check(manifest.join());
+            FoundryAdditions.LOGGER.info("extras check: {} problem(s)", problems.size());
+            if (problems.isEmpty()) {
+                done = true;
+                return;
+            }
+        }
+        showing = new ExtrasScreen(title, problems);
+        mc.setScreen(showing);
+    }
+
+    private void startLoad() {
+        Path dir = FMLPaths.CONFIGDIR.get().resolve("foundry-additions");
+        String url = FoundryConfig.EXTRAS_URL.get();
         manifest = CompletableFuture.supplyAsync(() -> ExtrasManifest.load(
-                ExtrasManifest.httpFetcher(ExtrasManifest.REMOTE_URL), cache, ExtrasManifest::bundledText),
+                dir.resolve("extras-override.json"), ExtrasManifest.httpFetcher(url),
+                dir.resolve("extras-cache.json"), ExtrasManifest::bundledText,
+                FoundryAdditions.LOGGER::warn),
                 r -> {
                     Thread t = new Thread(r, "foundry-extras-manifest");
                     t.setDaemon(true);
                     t.start();
                 });
-        NeoForge.EVENT_BUS.register(this);
-    }
-
-    // polling the title instead of an Opening hook, other mods stack screens over it
-    @SubscribeEvent
-    public void onClientTick(ClientTickEvent.Post event) {
-        if (shown) return;
-        Minecraft mc = Minecraft.getInstance();
-        if (!(mc.screen instanceof TitleScreen title) || mc.getOverlay() != null) return;
-        if (!manifest.isDone()) return;
-        shown = true;
-
-        if (!FoundryConfig.EXTRAS_PROMPT.get()) {
-            FoundryAdditions.LOGGER.info("extras prompt disabled by config");
-            return;
-        }
-        List<ExtrasChecker.Problem> problems = ExtrasChecker.check(manifest.join());
-        FoundryAdditions.LOGGER.info("extras check: {} problem(s)", problems.size());
-        if (!problems.isEmpty()) {
-            mc.setScreen(new ExtrasScreen(title, problems));
-        }
     }
 }

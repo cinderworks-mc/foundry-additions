@@ -18,6 +18,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public final class ExtrasManifest {
@@ -28,7 +29,7 @@ public final class ExtrasManifest {
     private static final int MAX_BYTES = 256 * 1024;
 
     public record Extra(String modId, String name, String minVersion, String jarHint,
-                        String page, String download, String fileVersion,
+                        String page, String download, String fileVersion, String minBuild,
                         List<String> requires) {}
 
     @FunctionalInterface
@@ -68,7 +69,7 @@ public final class ExtrasManifest {
                 }
             }
             out.add(new Extra(modId, name, str(o, "minVersion"), str(o, "jarHint"), page, download,
-                    str(o, "fileVersion"), List.copyOf(requires)));
+                    str(o, "fileVersion"), str(o, "minBuild"), List.copyOf(requires)));
         }
         return List.copyOf(out);
     }
@@ -80,6 +81,18 @@ public final class ExtrasManifest {
     private static String str(JsonObject o, String key) {
         JsonElement el = o.get(key);
         return el != null && el.isJsonPrimitive() ? el.getAsString().trim() : "";
+    }
+
+    public static List<Extra> load(Path override, Fetcher fetcher, Path cacheFile, Supplier<String> bundled,
+                                  Consumer<String> warn) {
+        if (Files.isRegularFile(override)) {
+            try {
+                return parse(Files.readString(override, StandardCharsets.UTF_8));
+            } catch (IOException | RuntimeException e) {
+                warn.accept("ignoring " + override + ": " + e.getMessage());
+            }
+        }
+        return load(fetcher, cacheFile, bundled);
     }
 
     public static List<Extra> load(Fetcher fetcher, Path cacheFile, Supplier<String> bundled) {

@@ -1,5 +1,6 @@
 package dev.hartforge.foundryadditions;
 
+import dev.hartforge.foundryadditions.client.ExtrasManifest;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
@@ -24,6 +25,7 @@ public final class FoundryConfig {
     public static final ModConfigSpec.BooleanValue CRASHDATA_ENABLED;
 
     public static final ModConfigSpec.BooleanValue EXTRAS_PROMPT;
+    public static final ModConfigSpec.ConfigValue<String> EXTRAS_URL;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -78,6 +80,10 @@ public final class FoundryConfig {
                 .comment("client only: on the title screen, offer help installing the extra mods the",
                         "foundry needs that we can't ship. false turns the screen off.")
                 .define("extrasPrompt", true);
+        EXTRAS_URL = b
+                .comment("where the extras list is fetched from. config/foundry-additions/extras-override.json",
+                        "beats this when it exists.")
+                .define("extrasUrl", ExtrasManifest.REMOTE_URL);
         b.pop();
 
         SPEC = b.build();
