@@ -62,10 +62,9 @@ public final class FoundryConfig {
         AFK_RIFT_CLASS = b
                 .comment("fully qualified class name of rift_essentials' AfkCommand, reached by",
                         "reflection. empty keeps the bridge off.",
-                        "STUB: the plan confirms the shape (public static isAfk(UUID) and",
-                        "setAfk(UUID, boolean, MinecraftServer) over a static Set<UUID>) but the",
-                        "class name itself must come from javap on the pinned rift_essentials jar.")
-                .define("riftAfkCommandClass", "");
+                        "checked against rift_essentials 1.0.0: public static isAfk(UUID) and",
+                        "setAfk(UUID, boolean, MinecraftServer).")
+                .define("riftAfkCommandClass", "org.voxelrift.essentials.command.AfkCommand");
         b.pop();
 
         b.push("crashdata");

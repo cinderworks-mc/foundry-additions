@@ -61,6 +61,12 @@ public final class OpsSocket {
 
     public void start() {
         socketPath = Path.of(FoundryConfig.OPS_SOCKET_PATH.get());
+        // hosts without the tmpfiles dir (macOS) just don't get a socket
+        Path dir = socketPath.toAbsolutePath().getParent();
+        if (!Files.isDirectory(dir)) {
+            FoundryAdditions.LOGGER.warn("ops socket off: {} missing", dir);
+            return;
+        }
         try {
             channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
             channel.bind(UnixDomainSocketAddress.of(socketPath));
