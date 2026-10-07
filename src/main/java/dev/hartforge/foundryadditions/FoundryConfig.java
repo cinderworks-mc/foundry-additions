@@ -23,6 +23,8 @@ public final class FoundryConfig {
 
     public static final ModConfigSpec.BooleanValue CRASHDATA_ENABLED;
 
+    public static final ModConfigSpec.BooleanValue EXTRAS_PROMPT;
+
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
 
@@ -69,6 +71,13 @@ public final class FoundryConfig {
                 .comment("stamp crash reports with config/foundry-pack.properties",
                         "(the pack build script writes that file from its own version).")
                 .define("enabled", true);
+        b.pop();
+
+        b.push("client");
+        EXTRAS_PROMPT = b
+                .comment("client only: on the title screen, offer help installing the extra mods the",
+                        "foundry needs that we can't ship. false turns the screen off.")
+                .define("extrasPrompt", true);
         b.pop();
 
         SPEC = b.build();

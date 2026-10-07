@@ -11,9 +11,10 @@ authors="patrickhere"
 description='''the foundry's own mod. server-side plumbing for one server and one whitelist.'''
 
 # no displayTest here on purpose. IGNORE_ALL_VERSION is not verified as a
-# 1.21.1 toml property, so it is not claimed. v0.1 ships nothing a vanilla
-# client needs anyway, and the vanilla-client join test on the rig is what
-# proves that, not a toml line.
+# 1.21.1 toml property, so it is not claimed. the extras prompt (client
+# package, dist = CLIENT entrypoint) is the first client piece, and it
+# registers nothing a vanilla client has to know about. the vanilla-client
+# join test on the rig is what proves that, not a toml line.
 
 [[dependencies.foundryadditions]]
 modId="neoforge"

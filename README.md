@@ -14,8 +14,11 @@ v0.1 is all server side plumbing. a unix socket so ops tooling can ask the
 server how it's doing without rcon, a session logger that will eventually
 replace our kubejs one (running side by side with it for now), the afk
 detector, and one line in crash reports that stamps which pack version was
-running. nothing in it reaches a client. the first version that needs a
-client download is v0.3.
+running. the first client piece is the extras prompt: a title screen that
+helps players install the few mods we can't ship ourselves. it registers
+nothing (no blocks, items, payloads or components), so a vanilla client
+should still join (the rig join test is still to run). toggle it with `extrasPrompt` in the config. the first
+version that needs a real client download is still v0.3.
 
 the details live in the code and in docs/. `tools/foundry-ops` is a small
 python client for the socket.
