@@ -1,4 +1,27 @@
 {
   "version": 1,
-  "extras": []
+  "extras": [
+    {
+      "modId": "astralsorcery",
+      "name": "Astral Sorcery",
+      "minVersion": "2.0.1",
+      "minBuild": "2.0.1.31",
+      "fileVersion": "2.0.1.32",
+      "jarHint": "AstralSorcery-",
+      "page": "https://maven.hellfiredev.net/hellfirepvp/astralsorcery/AstralSorcery/",
+      "download": "https://maven.hellfiredev.net/hellfirepvp/astralsorcery/AstralSorcery/2.0.1.32/AstralSorcery-2.0.1.32.jar",
+      "requires": ["observerlib"],
+      "note": "not in the pack, the author does not allow redistribution. this points at the author's own maven, builds come out often, bump the pin when a newer one is wanted."
+    },
+    {
+      "modId": "observerlib",
+      "name": "ObserverLib",
+      "minVersion": "1.10.3",
+      "fileVersion": "1.10.3.31",
+      "jarHint": "observerlib-",
+      "page": "https://maven.hellfiredev.net/hellfirepvp/observerlib/ObserverLib/",
+      "download": "https://maven.hellfiredev.net/hellfirepvp/observerlib/ObserverLib/1.10.3.31/ObserverLib-1.10.3.31.jar",
+      "note": "astral sorcery needs this library but does not declare it, so you have to install it yourself or the game crashes on load."
+    }
+  ]
 }
