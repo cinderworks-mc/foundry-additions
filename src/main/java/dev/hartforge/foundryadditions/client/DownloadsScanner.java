@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -19,6 +21,11 @@ public final class DownloadsScanner {
     public enum MoveResult { MOVED, COPIED_SOURCE_KEPT, ALREADY_EXISTS, REFUSED, FAILED }
 
     public enum RetireResult { RETIRED, REFUSED, FAILED }
+
+    public record Want(String modId, String jarHint, String minBuild, String oldFile) {}
+
+    // jar is null when nothing usable was in downloads
+    public record Outcome(String modId, Path jar, MoveResult move, RetireResult retired) {}
 
     private DownloadsScanner() {}
 
@@ -103,5 +110,25 @@ public final class DownloadsScanner {
             return RetireResult.FAILED;
         }
         return RetireResult.RETIRED;
+    }
+
+    public static List<Outcome> installAll(Path downloadsDir, Path modsDir, List<Want> wants, Instant now) {
+        List<Outcome> out = new ArrayList<>();
+        for (Want w : wants) {
+            Optional<Path> hit = find(downloadsDir, w.jarHint(), w.minBuild(), now);
+            if (hit.isEmpty()) {
+                out.add(new Outcome(w.modId(), null, null, null));
+                continue;
+            }
+            Path jar = hit.get();
+            MoveResult res = moveIntoMods(downloadsDir, jar, modsDir);
+            boolean landed = res == MoveResult.MOVED || res == MoveResult.COPIED_SOURCE_KEPT;
+            // two jars of one mod kills the launch, so the old one steps aside
+            RetireResult retired = landed && !w.oldFile().isEmpty()
+                    && !w.oldFile().equals(jar.getFileName().toString())
+                    ? retireOld(modsDir, w.oldFile()) : null;
+            out.add(new Outcome(w.modId(), jar, res, retired));
+        }
+        return out;
     }
 }

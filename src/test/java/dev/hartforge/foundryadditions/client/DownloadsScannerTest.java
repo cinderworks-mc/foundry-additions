@@ -154,4 +154,58 @@ class DownloadsScannerTest {
         assertEquals("jar", Files.readString(mods.resolve("a.jar")));
         assertEquals("older", Files.readString(mods.resolve("a.jar.old")));
     }
+
+    private static DownloadsScanner.Want want(String id, String hint, String minBuild, String old) {
+        return new DownloadsScanner.Want(id, hint, minBuild, old);
+    }
+
+    @Test
+    void installAllMovesSeveralAndReportsTheMissingOne(@TempDir Path root) throws IOException {
+        Path dl = Files.createDirectory(root.resolve("dl"));
+        Path mods = Files.createDirectory(root.resolve("mods"));
+        jar(dl, "AstralSorcery-2.0.1.20.jar", NOW, "stale");
+        jar(dl, "AstralSorcery-2.0.1.32.jar", NOW.minusSeconds(3600), "astral");
+        jar(dl, "observerlib-1.10.3.jar", NOW, "obs");
+        jar(dl, "unrelated.jar", NOW, "keep");
+        jar(mods, "AstralSorcery-2.0.1.19.jar", NOW, "old astral");
+        jar(mods, "bystander.jar", NOW, "b");
+
+        var outs = DownloadsScanner.installAll(dl, mods, java.util.List.of(
+                want("astralsorcery", "AstralSorcery-", "2.0.1.31", "AstralSorcery-2.0.1.19.jar"),
+                want("observerlib", "observerlib-", "", ""),
+                want("missingmod", "missing-", "", "")), NOW);
+
+        assertEquals(3, outs.size());
+        assertEquals(DownloadsScanner.MoveResult.MOVED, outs.get(0).move());
+        assertEquals(DownloadsScanner.RetireResult.RETIRED, outs.get(0).retired());
+        assertEquals(DownloadsScanner.MoveResult.MOVED, outs.get(1).move());
+        assertEquals(null, outs.get(1).retired());
+        assertEquals(null, outs.get(2).jar());
+
+        assertEquals("astral", Files.readString(mods.resolve("AstralSorcery-2.0.1.32.jar")));
+        assertEquals("obs", Files.readString(mods.resolve("observerlib-1.10.3.jar")));
+        assertTrue(Files.exists(mods.resolve("AstralSorcery-2.0.1.19.jar.old")));
+        assertFalse(Files.exists(mods.resolve("AstralSorcery-2.0.1.19.jar")));
+        assertEquals("b", Files.readString(mods.resolve("bystander.jar")));
+        // the too old and unrelated downloads were never touched
+        assertTrue(Files.exists(dl.resolve("AstralSorcery-2.0.1.20.jar")));
+        assertTrue(Files.exists(dl.resolve("unrelated.jar")));
+        assertFalse(Files.exists(dl.resolve("AstralSorcery-2.0.1.32.jar")));
+        try (var s = Files.list(mods)) {
+            assertEquals(4, s.count());
+        }
+    }
+
+    @Test
+    void installAllDoesNotRetireWhenTheMoveFailed(@TempDir Path root) throws IOException {
+        Path dl = Files.createDirectory(root.resolve("dl"));
+        Path mods = Files.createDirectory(root.resolve("mods"));
+        jar(dl, "a-2.jar", NOW, "new");
+        jar(mods, "a-2.jar", NOW, "already");
+        jar(mods, "a-1.jar", NOW, "old");
+        var outs = DownloadsScanner.installAll(dl, mods, java.util.List.of(want("a", "a-", "", "a-1.jar")), NOW);
+        assertEquals(DownloadsScanner.MoveResult.ALREADY_EXISTS, outs.get(0).move());
+        assertEquals(null, outs.get(0).retired());
+        assertTrue(Files.exists(mods.resolve("a-1.jar")));
+    }
 }

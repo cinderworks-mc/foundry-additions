@@ -16,6 +16,9 @@ description='''the foundry's own mod. server-side plumbing for one server and on
 # registers nothing a vanilla client has to know about. the vanilla-client
 # join test on the rig is what proves that, not a toml line.
 
+[[mixins]]
+config="foundryadditions.mixins.json"
+
 [[dependencies.foundryadditions]]
 modId="neoforge"
 type="required"

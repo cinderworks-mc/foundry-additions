@@ -17,6 +17,12 @@ java {
 
 repositories {
 	mavenCentral()
+	maven {
+		url = 'https://maven.bawnorton.com/releases'
+		content {
+			includeGroup 'com.github.bawnorton.mixinsquared'
+		}
+	}
 }
 
 neoForge {
@@ -37,6 +43,15 @@ neoForge {
 }
 
 dependencies {
+	// same version supplementaries nests, so jarjar dedups. cancels goety's wind shrine
+	// placer mixin when tropicraft is around, see compat/MixinCancels
+	compileOnly 'com.github.bawnorton.mixinsquared:mixinsquared-common:0.3.7-beta.3'
+	jarJar(runtimeOnly('com.github.bawnorton.mixinsquared:mixinsquared-neoforge:0.3.7-beta.3')) {
+		version {
+			strictly '[0.3.7-beta.3,)'
+			prefer '0.3.7-beta.3'
+		}
+	}
 	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
