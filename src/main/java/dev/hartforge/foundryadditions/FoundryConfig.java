@@ -24,6 +24,8 @@ public final class FoundryConfig {
 
     public static final ModConfigSpec.BooleanValue CRASHDATA_ENABLED;
 
+    public static final ModConfigSpec.BooleanValue REPORTS_ENABLED;
+
     public static final ModConfigSpec.BooleanValue EXTRAS_PROMPT;
     public static final ModConfigSpec.ConfigValue<String> EXTRAS_URL;
 
@@ -71,6 +73,12 @@ public final class FoundryConfig {
         CRASHDATA_ENABLED = b
                 .comment("stamp crash reports with config/foundry-pack.properties",
                         "(the pack build script writes that file from its own version).")
+                .define("enabled", true);
+        b.pop();
+
+        b.push("reports");
+        REPORTS_ENABLED = b
+                .comment("!log and !idea in chat file a report for the admins. also shows a reminder after login.")
                 .define("enabled", true);
         b.pop();
 

@@ -2,6 +2,7 @@ package dev.hartforge.foundryadditions;
 
 import dev.hartforge.foundryadditions.ops.OpsSocket;
 import dev.hartforge.foundryadditions.pack.CrashData;
+import dev.hartforge.foundryadditions.report.ReportEvents;
 import dev.hartforge.foundryadditions.session.SessionEvents;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -36,11 +37,13 @@ public final class FoundryAdditions {
         // is readable there and not in this constructor
         modBus.addListener((FMLCommonSetupEvent e) -> e.enqueueWork(CrashData::register));
         NeoForge.EVENT_BUS.register(SessionEvents.class);
+        NeoForge.EVENT_BUS.register(ReportEvents.class);
         NeoForge.EVENT_BUS.register(this);
     }
 
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
+        ReportEvents.init();
         if (!FoundryConfig.OPS_ENABLED.get()) {
             LOGGER.info("ops socket disabled by config");
             return;
