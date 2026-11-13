@@ -2,150 +2,109 @@ package dev.hartforge.foundryadditions.client;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ContainerObjectSelectionList;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.neoforged.fml.loading.FMLPaths;
-import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.OptionalLong;
 
 public final class ExtrasScreen extends Screen {
 
-    private static final int BAR_W = 4;
+    private static final int ACTION_W = 56;
+    private static final int PAGE_W = 62;
 
     private final Screen parent;
-    private final List<ExtrasChecker.Problem> problems;
+    private final ExtrasSession session;
     private final Path modsDir = FMLPaths.MODSDIR.get();
-    private final Path downloadsDir = DownloadsScanner.defaultDownloadsDir();
+    private final Map<ExtrasChecker.Row, RowEntry> entries = new HashMap<>();
 
-    private final Map<String, String> status = new HashMap<>();
-    private final Set<String> moved = new HashSet<>();
-    private Button installBtn;
-    private boolean busy;
+    private RowList list;
+    private EditBox search;
+    private Button allBtn;
+    private Button fromDownloadsBtn;
+    private Button closeBtn;
+    private String query = "";
     private boolean closed;
-    private boolean barDrag;
-    private int offset;
 
-    public ExtrasScreen(Screen parent, List<ExtrasChecker.Problem> problems) {
-        super(Component.literal("the foundry needs more mods"));
+    public ExtrasScreen(Screen parent, ExtrasSession session) {
+        super(Component.literal("extra mods"));
         this.parent = parent;
-        this.problems = problems;
+        this.session = session;
     }
 
     @Override
     protected void init() {
         int cx = this.width / 2;
         int top = ExtrasLayout.buttonsTop(this.height);
-        int opens = (int) problems.stream().filter(p -> !urlFor(p).isEmpty()).count();
-        Button dl = Button.builder(Component.literal("download all (" + opens + ")"), b -> downloadAll())
+        ExtrasLayout.Area a = ExtrasLayout.list(this.height);
+
+        search = new EditBox(this.font, cx - 100, 31, 200, 16, search, Component.literal("search"));
+        search.setHint(Component.literal("search by name").withColor(0x808080));
+        search.setResponder(s -> {
+            query = s.trim().toLowerCase(Locale.ROOT);
+            list.refill();
+        });
+        addRenderableWidget(search);
+
+        list = new RowList(this.minecraft, this.width, a.bottom() - a.top(), a.top());
+        list.refill();
+        addRenderableWidget(list);
+
+        allBtn = Button.builder(Component.empty(), b -> session.download(session.wantedForAll()))
                 .bounds(cx - 150, top, 148, 20).build();
-        dl.active = opens > 0;
-        addRenderableWidget(dl);
-        installBtn = Button.builder(Component.literal("install all"), b -> installAll())
+        addRenderableWidget(allBtn);
+        fromDownloadsBtn = Button.builder(Component.literal("add from downloads folder"),
+                        b -> session.addFromDownloads(Instant.now()))
                 .bounds(cx + 2, top, 148, 20).build();
-        installBtn.active = !busy;
-        addRenderableWidget(installBtn);
-        addRenderableWidget(Button.builder(Component.literal("open mods folder"), b -> openModsFolder())
+        addRenderableWidget(fromDownloadsBtn);
+        addRenderableWidget(Button.builder(Component.literal("open mods folder"),
+                        b -> Util.getPlatform().openFile(modsDir.toFile()))
                 .bounds(cx - 150, top + 24, 97, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("not now"), b -> onClose())
-                .bounds(cx - 48, top + 24, 97, 20).build());
+        closeBtn = Button.builder(Component.literal("not now"), b -> onClose())
+                .bounds(cx - 48, top + 24, 97, 20).build();
+        addRenderableWidget(closeBtn);
         addRenderableWidget(Button.builder(Component.literal("quit game"), b -> this.minecraft.stop())
                 .bounds(cx + 53, top + 24, 97, 20).build());
-        offset = ExtrasLayout.clamp(offset, problems.size(), ExtrasLayout.list(this.height).rows());
+        refreshButtons();
+    }
+
+    @Override
+    public void tick() {
+        session.tick(System.nanoTime());
+        refreshButtons();
+    }
+
+    private void refreshButtons() {
+        List<ExtrasChecker.Row> all = session.wantedForAll();
+        allBtn.setMessage(Component.literal(ExtrasText.downloadAll(all.size(),
+                all.stream().map(session::size).toList())));
+        allBtn.active = !all.isEmpty() && !session.scanning();
+        fromDownloadsBtn.active = !session.active();
+        closeBtn.setMessage(Component.literal(session.active() ? "stop and close"
+                : session.anyDone() ? "close" : "not now"));
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         super.render(g, mouseX, mouseY, partialTick);
         int cx = this.width / 2;
-        int n = problems.size();
-        boolean allIn = moved.size() == n && status.values().stream().noneMatch(v -> v.contains("by hand"));
-        g.drawCenteredString(this.font,
-                Component.literal("the foundry needs " + n + " more mod" + (n == 1 ? "" : "s") + " to join"),
-                cx, 8, 0xFFFFFF);
-        g.drawCenteredString(this.font,
-                Component.literal(allIn ? "all in. restart the game now"
-                        : "mods load at launch, so restart the game after adding them"),
-                cx, 20, allIn ? 0x55FF55 : 0xAAAAAA);
-
-        ExtrasLayout.Area a = ExtrasLayout.list(this.height);
-        boolean bar = n > a.rows();
-        int left = 10;
-        int right = this.width - 10 - (bar ? BAR_W + 3 : 0);
-        for (int i = 0; i < a.rows() && offset + i < n; i++) {
-            ExtrasChecker.Problem p = problems.get(offset + i);
-            String st = statusOf(p);
-            int y = a.top() + i * ExtrasLayout.ROW_H + 2;
-            String shownStatus = this.font.plainSubstrByWidth(st, (right - left) * 3 / 5);
-            int sw = this.font.width(shownStatus);
-            String name = this.font.plainSubstrByWidth(p.extra().name(), right - left - sw - 8);
-            int color = moved.contains(p.extra().modId()) ? 0x55FF55 : 0xFFFFFF;
-            g.drawString(this.font, name, left, y, color);
-            g.drawString(this.font, shownStatus, right - sw, y, 0xAAAAAA);
-        }
-        if (bar) {
-            int len = a.bottom() - a.top();
-            int thumb = Math.max(8, len * a.rows() / n);
-            int thumbY = a.top() + (len - thumb) * offset / (n - a.rows());
-            int x = this.width - 10 - BAR_W;
-            g.fill(x, a.top(), x + BAR_W, a.bottom(), 0x55000000);
-            g.fill(x, thumbY, x + BAR_W, thumbY + thumb, 0xFFAAAAAA);
-        }
-    }
-
-    @Override
-    public boolean mouseScrolled(double mx, double my, double sx, double sy) {
-        scrollTo(offset - (int) Math.signum(sy));
-        return true;
-    }
-
-    @Override
-    public boolean mouseClicked(double mx, double my, int button) {
-        if (onBar(mx, my)) {
-            barDrag = true;
-            barTo(my);
-            return true;
-        }
-        return super.mouseClicked(mx, my, button);
-    }
-
-    @Override
-    public boolean mouseReleased(double mx, double my, int button) {
-        barDrag = false;
-        return super.mouseReleased(mx, my, button);
-    }
-
-    @Override
-    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (barDrag) {
-            barTo(my);
-            return true;
-        }
-        return super.mouseDragged(mx, my, button, dx, dy);
-    }
-
-    @Override
-    public boolean keyPressed(int key, int scan, int mods) {
-        int rows = ExtrasLayout.list(this.height).rows();
-        switch (key) {
-            case GLFW.GLFW_KEY_UP -> scrollTo(offset - 1);
-            case GLFW.GLFW_KEY_DOWN -> scrollTo(offset + 1);
-            case GLFW.GLFW_KEY_PAGE_UP -> scrollTo(offset - rows);
-            case GLFW.GLFW_KEY_PAGE_DOWN -> scrollTo(offset + rows);
-            default -> {
-                return super.keyPressed(key, scan, mods);
-            }
-        }
-        return true;
+        g.drawCenteredString(this.font, ExtrasText.title(session.needingAction(), session.anyDone()), cx, 8, 0xFFFFFF);
+        ExtrasText.Line sub = ExtrasText.subtitle(session.active(), session.anyDone(), session.notice());
+        g.drawCenteredString(this.font, sub.text(), cx, 20, color(sub.tone()));
     }
 
     public boolean closed() {
@@ -155,91 +114,148 @@ public final class ExtrasScreen extends Screen {
     @Override
     public void onClose() {
         closed = true;
+        session.stopAll();
         this.minecraft.setScreen(parent);
     }
 
-    private boolean onBar(double mx, double my) {
-        ExtrasLayout.Area a = ExtrasLayout.list(this.height);
-        int x = this.width - 10 - BAR_W;
-        return problems.size() > a.rows() && mx >= x - 2 && mx <= x + BAR_W + 2 && my >= a.top() && my <= a.bottom();
+    private static int color(ExtrasText.Tone tone) {
+        return switch (tone) {
+            case GOOD -> 0x55FF55;
+            case WARN -> 0xFFCC55;
+            case BAD -> 0xFF7070;
+            case BUSY -> 0x80D8FF;
+            case PLAIN -> 0xAAAAAA;
+        };
     }
 
-    private void barTo(double my) {
-        offset = ExtrasLayout.offsetForClick(my, ExtrasLayout.list(this.height), problems.size());
+    private boolean matches(ExtrasChecker.Row r) {
+        return query.isEmpty() || r.extra().name().toLowerCase(Locale.ROOT).contains(query)
+                || r.extra().modId().toLowerCase(Locale.ROOT).contains(query);
     }
 
-    private void scrollTo(int to) {
-        offset = ExtrasLayout.clamp(to, problems.size(), ExtrasLayout.list(this.height).rows());
-    }
+    private final class RowList extends ContainerObjectSelectionList<RowEntry> {
 
-    private String statusOf(ExtrasChecker.Problem p) {
-        String s = status.get(p.extra().modId());
-        if (s != null) return s;
-        return p.status() == ExtrasChecker.Status.MISSING ? "missing" : "need " + p.need();
-    }
-
-    private static String urlFor(ExtrasChecker.Problem p) {
-        return p.extra().download().isEmpty() ? p.extra().page() : p.extra().download();
-    }
-
-    private void openModsFolder() {
-        Util.getPlatform().openFile(modsDir.toFile());
-    }
-
-    private void downloadAll() {
-        List<String> urls = problems.stream().map(ExtrasScreen::urlFor).filter(u -> !u.isEmpty()).toList();
-        Thread t = new Thread(() -> {
-            for (String u : urls) {
-                Util.getPlatform().openUri(u);
-                try {
-                    // browsers drop tabs opened back to back
-                    Thread.sleep(300);
-                } catch (InterruptedException e) {
-                    return;
-                }
-            }
-        }, "foundry-extras-open");
-        t.setDaemon(true);
-        t.start();
-    }
-
-    private void installAll() {
-        busy = true;
-        installBtn.active = false;
-        Minecraft mc = this.minecraft;
-        List<DownloadsScanner.Want> wants = problems.stream()
-                .filter(p -> !moved.contains(p.extra().modId()))
-                .map(p -> new DownloadsScanner.Want(p.extra().modId(), p.extra().jarHint(),
-                        p.extra().minBuild(), p.oldFile()))
-                .toList();
-        CompletableFuture.supplyAsync(() -> DownloadsScanner.installAll(downloadsDir, modsDir, wants, Instant.now()))
-                .thenAccept(outs -> mc.execute(() -> {
-                    for (DownloadsScanner.Outcome o : outs) {
-                        apply(o, wants.stream().filter(w -> w.modId().equals(o.modId())).findFirst().get());
-                    }
-                    busy = false;
-                    if (installBtn != null) installBtn.active = true;
-                }));
-    }
-
-    private void apply(DownloadsScanner.Outcome o, DownloadsScanner.Want w) {
-        if (o.jar() == null) {
-            status.put(o.modId(), "not found yet");
-            return;
+        RowList(Minecraft mc, int width, int height, int y) {
+            super(mc, width, height, y, ExtrasLayout.ROW_H);
         }
-        switch (o.move()) {
-            case MOVED, COPIED_SOURCE_KEPT -> {
-                moved.add(o.modId());
-                if (o.retired() == null) {
-                    status.put(o.modId(), "moved");
-                } else if (o.retired() == DownloadsScanner.RetireResult.RETIRED) {
-                    status.put(o.modId(), "moved, old one set aside");
-                } else {
-                    status.put(o.modId(), "moved, remove " + w.oldFile() + " by hand");
+
+        void refill() {
+            List<RowEntry> shown = session.rows().stream()
+                    .filter(ExtrasScreen.this::matches)
+                    .map(r -> entries.computeIfAbsent(r, RowEntry::new))
+                    .toList();
+            replaceEntries(shown);
+            setScrollAmount(0);
+        }
+
+        @Override
+        public int getRowWidth() {
+            return ExtrasLayout.rowWidth(ExtrasScreen.this.width);
+        }
+
+        @Override
+        protected void renderDecorations(GuiGraphics g, int mouseX, int mouseY) {
+            if (children().isEmpty()) {
+                g.drawCenteredString(ExtrasScreen.this.font, "nothing matches \"" + query + "\"",
+                        getX() + width / 2, getY() + 12, 0xAAAAAA);
+            }
+        }
+    }
+
+    private final class RowEntry extends ContainerObjectSelectionList.Entry<RowEntry> {
+
+        private final ExtrasChecker.Row row;
+        private final Button action;
+        private final Button page;
+        private String tip = "";
+
+        RowEntry(ExtrasChecker.Row row) {
+            this.row = row;
+            this.action = Button.builder(Component.empty(), b -> press()).size(ACTION_W, 20).build();
+            String url = row.extra().page().isEmpty() ? row.extra().download() : row.extra().page();
+            this.page = Button.builder(Component.literal(ExtrasText.pageLabel(url)),
+                    b -> Util.getPlatform().openUri(url)).size(PAGE_W, 20)
+                    .tooltip(Tooltip.create(Component.literal("open this mod's page in your browser")))
+                    .build();
+            this.page.visible = !url.isEmpty();
+        }
+
+        private void press() {
+            switch (session.job(row).phase()) {
+                case WAITING, DOWNLOADING -> session.stop(row);
+                default -> session.download(session.wantedFor(row));
+            }
+        }
+
+        @Override
+        public void render(GuiGraphics g, int index, int top, int left, int width, int height, int mouseX, int mouseY,
+                           boolean hovering, float partialTick) {
+            Font font = ExtrasScreen.this.font;
+            ExtrasSession.Job job = session.job(row);
+            ExtrasSession.Phase phase = job.phase();
+            List<ExtrasChecker.Row> wants = session.wantedFor(row);
+            String label = ExtrasText.action(row, phase, !wants.isEmpty());
+
+            int right = left + width;
+            int buttonY = top + (height - 20) / 2;
+            action.visible = !label.isEmpty();
+            action.setMessage(Component.literal(label));
+            action.setPosition(right - ACTION_W, buttonY);
+            int pageX = right - ACTION_W - (action.visible ? 4 : 0) - (page.visible ? PAGE_W : 0);
+            page.setPosition(pageX, buttonY);
+            if (action.visible) action.render(g, mouseX, mouseY, partialTick);
+            if (page.visible) page.render(g, mouseX, mouseY, partialTick);
+
+            OptionalLong size = wants.stream().map(session::size).reduce(OptionalLong.of(0),
+                    (x, y) -> x.isPresent() && y.isPresent() ? OptionalLong.of(x.getAsLong() + y.getAsLong())
+                            : OptionalLong.empty());
+            String newTip = ExtrasText.actionTip(label, wants.stream().map(w -> w.extra().name()).toList(), size);
+            if (!newTip.equals(tip)) {
+                tip = newTip;
+                action.setTooltip(tip.isEmpty() ? null : Tooltip.create(Component.literal(tip)));
+            }
+
+            int textRight = pageX - 6;
+            if ((phase == ExtrasSession.Phase.IDLE || phase == ExtrasSession.Phase.FAILED) && !wants.isEmpty()) {
+                if (size.isPresent()) {
+                    String s = ExtrasText.size(size.getAsLong());
+                    textRight -= font.width(s);
+                    g.drawString(font, s, textRight, top + (height - 8) / 2, 0xAAAAAA);
+                    textRight -= 6;
                 }
             }
-            case ALREADY_EXISTS -> status.put(o.modId(), "already in mods, left alone");
-            default -> status.put(o.modId(), "couldn't move " + o.jar().getFileName());
+            int room = textRight - left;
+            g.drawString(font, font.plainSubstrByWidth(row.extra().name(), room), left, top + 1, 0xFFFFFF);
+
+            List<String> missing = session.missingRequires(row).stream().map(session::nameOf).toList();
+            ExtrasText.Line line = ExtrasText.state(row, phase, job.done(), job.total(), job.message(), missing);
+            int x = left;
+            int y = top + 12;
+            if (phase == ExtrasSession.Phase.DOWNLOADING && job.total() > 0) {
+                int barW = Math.min(60, room / 3);
+                int fill = (int) (barW * Math.min(1.0, job.done() / (double) job.total()));
+                g.fill(x, y + 1, x + barW, y + 7, 0xFF303030);
+                g.fill(x, y + 1, x + fill, y + 7, 0xFF55AAFF);
+                x += barW + 5;
+            }
+            String text = line.text();
+            String shown = font.plainSubstrByWidth(text, textRight - x);
+            if (!shown.equals(text)) shown = font.plainSubstrByWidth(text, textRight - x - font.width("...")) + "...";
+            g.drawString(font, shown, x, y, color(line.tone()));
+            // long messages get cut on small windows, hovering the line shows all of it
+            if (!shown.equals(text) && mouseX >= x && mouseX < textRight && mouseY >= y - 1 && mouseY < y + 10) {
+                ExtrasScreen.this.setTooltipForNextRenderPass(Component.literal(text));
+            }
+        }
+
+        @Override
+        public List<? extends GuiEventListener> children() {
+            return List.of(page, action);
+        }
+
+        @Override
+        public List<? extends NarratableEntry> narratables() {
+            return List.of(page, action);
         }
     }
 }

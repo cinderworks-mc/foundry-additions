@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -14,12 +15,14 @@ import net.neoforged.neoforge.common.NeoForge;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Mod(value = FoundryAdditions.MOD_ID, dist = Dist.CLIENT)
 public final class FoundryAdditionsClient {
 
     private boolean done;
-    private List<ExtrasChecker.Problem> problems;
+    private ExtrasSession session;
     private ExtrasScreen showing;
     private CompletableFuture<List<ExtrasManifest.Extra>> manifest;
 
@@ -39,7 +42,7 @@ public final class FoundryAdditionsClient {
         Minecraft mc = Minecraft.getInstance();
         if (!(mc.screen instanceof TitleScreen title) || mc.getOverlay() != null) return;
 
-        if (problems == null) {
+        if (session == null) {
             if (manifest == null) {
                 if (!FoundryConfig.EXTRAS_PROMPT.get()) {
                     FoundryAdditions.LOGGER.info("extras prompt disabled by config");
@@ -49,15 +52,32 @@ public final class FoundryAdditionsClient {
                 startLoad();
             }
             if (!manifest.isDone()) return;
-            problems = ExtrasChecker.check(manifest.join());
-            FoundryAdditions.LOGGER.info("extras check: {} problem(s)", problems.size());
-            if (problems.isEmpty()) {
+            session = newSession(ExtrasChecker.check(manifest.join()));
+            int needing = session.needingAction();
+            FoundryAdditions.LOGGER.info("extras check: {} of {} need attention", needing, session.rows().size());
+            if (needing == 0) {
                 done = true;
                 return;
             }
+            session.probeSizes();
         }
-        showing = new ExtrasScreen(title, problems);
+        showing = new ExtrasScreen(title, session);
         mc.setScreen(showing);
+    }
+
+    private static ExtrasSession newSession(List<ExtrasChecker.Row> rows) {
+        Path mods = FMLPaths.MODSDIR.get();
+        ExtrasDownloader.sweep(mods);
+        return new ExtrasSession(rows, new ExtrasDownloader(ExtrasDownloader.defaultClient()), mods,
+                DownloadsScanner.defaultDownloadsDir(), pool(), ModList.get()::isLoaded, FoundryAdditions.LOGGER::info);
+    }
+
+    private static ExecutorService pool() {
+        return Executors.newFixedThreadPool(3, r -> {
+            Thread t = new Thread(r, "foundry-extras-download");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     private void startLoad() {
