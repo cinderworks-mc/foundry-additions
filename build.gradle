@@ -30,6 +30,9 @@ neoForge {
 	version = project.neoforge_version
 
 	runs {
+		client {
+			client()
+		}
 		server {
 			server()
 		}
